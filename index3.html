@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estação Meteorológica Arduino</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card-bg: #1e293b;
+            --text: #e2e8f0;
+            --accent: #38bdf8;
+            --success: #4ade80;
+            --danger: #f87171;
+            --temp-aht: #fb7185;
+            --temp-bmp: #f97316;
+            --umid: #38bdf8;
+            --press: #a78bfa;
+            --lux: #fbbf24;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 1.5rem 1rem;
+        }
+        h1 { font-weight: 300; letter-spacing: 1px; margin-bottom: 0.25rem; }
+        .subtitle { color: #94a3b8; font-size: 0.85rem; margin-bottom: 1.25rem; }
+
+        .controls {
+            margin-bottom: 1.5rem;
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        button {
+            border: none;
+            padding: 0.7rem 1.4rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 0.95rem;
+        }
+        #connectBtn { background: var(--accent); color: #0f172a; }
+        #connectBtn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+        #disconnectBtn { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+        #disconnectBtn:hover:not(:disabled) { background: rgba(248,113,113,0.1); }
+        button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        .status { font-size: 0.9rem; color: var(--danger); }
+        .status.connected { color: var(--success); }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.9rem;
+            width: 100%;
+            max-width: 1100px;
+            margin-bottom: 1.5rem;
+        }
+        .card {
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 1rem 1.2rem;
+            box-shadow: 0 8px 20px -6px rgba(0,0,0,0.3);
+            border: 1px solid #334155;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .card:hover { transform: translateY(-2px); border-color: var(--accent); }
+        .card-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #94a3b8;
+            margin-bottom: 0.3rem;
+        }
+        .card-value { font-size: 1.8rem; font-weight: 700; color: var(--accent); line-height: 1.1; }
+        .card-unit { font-size: 0.85rem; font-weight: 400; color: #94a3b8; margin-left: 4px; }
+
+        /* Grade 2x2 de gráficos */
+        .charts {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1.2rem;
+            width: 100%;
+            max-width: 1100px;
+        }
+        @media (max-width: 760px) {
+            .charts { grid-template-columns: 1fr; }
+        }
+        .chart-box {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 1rem 1.2rem 1.2rem;
+            border: 1px solid #334155;
+            box-shadow: 0 8px 20px -6px rgba(0,0,0,0.3);
+            position: relative;
+            height: 300px;
+        }
+        .chart-box h2 {
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: #94a3b8;
+            margin-bottom: 0.5rem;
+        }
+        .chart-box canvas { max-height: 240px; }
+        .footer { margin-top: 2rem; font-size: 0.75rem; color: #475569; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1>Estação Meteorológica</h1>
+    <p class="subtitle">Arduino Uno R3 + VEML7700 + AHT20 + BMP280</p>
+
+    <div class="controls">
+        <button id="connectBtn">Conectar Arduino</button>
+        <button id="disconnectBtn" disabled>Desconectar</button>
+        <span id="status" class="status">Desconectado</span>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-label">Luminosidade</div>
+            <div><span class="card-value" id="lux">--</span><span class="card-unit">lux</span></div>
+        </div>
+        <div class="card">
+            <div class="card-label">Temp. (AHT20)</div>
+            <div><span class="card-value" id="temp_aht">--</span><span class="card-unit">°C</span></div>
+        </div>
+        <div class="card">
+            <div class="card-label">Umidade</div>
+            <div><span class="card-value" id="umid">--</span><span class="card-unit">%</span></div>
+        </div>
+        <div class="card">
+            <div class="card-label">Pressão</div>
+            <div><span class="card-value" id="pressao">--</span><span class="card-unit">hPa</span></div>
+        </div>
+        <div class="card">
+            <div class="card-label">Temp. (BMP280)</div>
+            <div><span class="card-value" id="temp_bmp">--</span><span class="card-unit">°C</span></div>
+        </div>
+    </div>
+
+    <div class="charts">
+        <div class="chart-box">
+            <h2>Temperatura (°C)</h2>
+            <canvas id="chartTemp"></canvas>
+        </div>
+        <div class="chart-box">
+            <h2>Umidade (%)</h2>
+            <canvas id="chartUmid"></canvas>
+        </div>
+        <div class="chart-box">
+            <h2>Pressão (hPa)</h2>
+            <canvas id="chartPress"></canvas>
+        </div>
+        <div class="chart-box">
+            <h2>Luminosidade (lux)</h2>
+            <canvas id="chartLux"></canvas>
+        </div>
+    </div>
+
+    <div class="footer">Web Serial API • Chart.js • Use Chrome ou Edge em localhost</div>
+
+    <script>
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const statusSpan = document.getElementById('status');
+
+        let port = null;
+        let reader = null;
+        let bufferParcial = '';
+        const decoder = new TextDecoder();
+
+        // -------- Configuração comum dos gráficos --------
+        const MAX_PONTOS = 60;
+        const labels = [];
+
+        const baseOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#cbd5e1', boxWidth: 12, font: { size: 11 } } },
+                tooltip: { backgroundColor: '#0f172a', borderColor: '#334155', borderWidth: 1 }
+            },
+            scales: {
+                x: {
+                    ticks: { color: '#64748b', maxTicksLimit: 6, font: { size: 10 } },
+                    grid: { color: 'rgba(148,163,184,0.08)' }
+                },
+                y: {
+                    ticks: { color: '#94a3b8', font: { size: 10 } },
+                    grid: { color: 'rgba(148,163,184,0.08)' }
+                }
+            }
+        };
+
+        function makeLineDataset(label, color, dash = []) {
+            return {
+                label,
+                data: [],
+                borderColor: color,
+                backgroundColor: color + '22',
+                tension: 0.3,
+                pointRadius: 0,
+                borderWidth: 2,
+                borderDash: dash
+            };
+        }
+
+        // Gráfico 1: Temperatura (AHT20 + BMP280)
+        const chartTemp = new Chart(document.getElementById('chartTemp'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    makeLineDataset('AHT20 (°C)', '#fb7185'),
+                    makeLineDataset('BMP280 (°C)', '#f97316', [4, 3])
+                ]
+            },
+            options: structuredClone(baseOptions)
+        });
+
+        // Gráfico 2: Umidade
+        const chartUmid = new Chart(document.getElementById('chartUmid'), {
+            type: 'line',
+            data: { labels, datasets: [makeLineDataset('Umidade (%)', '#38bdf8')] },
+            options: structuredClone(baseOptions)
+        });
+
+        // Gráfico 3: Pressão
+        const chartPress = new Chart(document.getElementById('chartPress'), {
+            type: 'line',
+            data: { labels, datasets: [makeLineDataset('Pressão (hPa)', '#a78bfa')] },
+            options: structuredClone(baseOptions)
+        });
+
+        // Gráfico 4: Luminosidade
+        const chartLux = new Chart(document.getElementById('chartLux'), {
+            type: 'line',
+            data: { labels, datasets: [makeLineDataset('Luminosidade (lux)', '#fbbf24')] },
+            options: structuredClone(baseOptions)
+        });
+
+        // Adiciona um ponto em todos os gráficos
+        function pushData(data) {
+            const agora = new Date();
+            const label = agora.toLocaleTimeString('pt-BR', {
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+            });
+
+            if (labels.length >= MAX_PONTOS) {
+                labels.shift();
+                chartTemp.data.datasets.forEach(ds => ds.data.shift());
+                chartUmid.data.datasets.forEach(ds => ds.data.shift());
+                chartPress.data.datasets.forEach(ds => ds.data.shift());
+                chartLux.data.datasets.forEach(ds => ds.data.shift());
+            }
+
+            labels.push(label);
+            chartTemp.data.datasets[0].data.push(data.temp_aht ?? null);
+            chartTemp.data.datasets[1].data.push(data.temp_bmp ?? null);
+            chartUmid.data.datasets[0].data.push(data.umid ?? null);
+            chartPress.data.datasets[0].data.push(data.pressao ?? null);
+            chartLux.data.datasets[0].data.push(data.lux ?? null);
+
+            chartTemp.update('none');
+            chartUmid.update('none');
+            chartPress.update('none');
+            chartLux.update('none');
+        }
+
+        function updateUI(data) {
+            if (data.erro) { console.error('Erro do Arduino:', data.erro); return; }
+
+            if (data.lux      !== undefined) document.getElementById('lux').textContent      = data.lux;
+            if (data.temp_aht !== undefined) document.getElementById('temp_aht').textContent = data.temp_aht;
+            if (data.umid     !== undefined) document.getElementById('umid').textContent     = data.umid;
+            if (data.pressao  !== undefined) document.getElementById('pressao').textContent  = data.pressao;
+            if (data.temp_bmp !== undefined) document.getElementById('temp_bmp').textContent = data.temp_bmp;
+
+            pushData(data);
+        }
+
+        async function readSerial() {
+            console.log('readSerial iniciou');
+            while (port && port.readable && reader) {
+                try {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    bufferParcial += decoder.decode(value, { stream: true });
+
+                    let idx;
+                    while ((idx = bufferParcial.indexOf('\n')) !== -1) {
+                        const linha = bufferParcial.slice(0, idx).trim();
+                        bufferParcial = bufferParcial.slice(idx + 1);
+
+                        if (linha.startsWith('{') && linha.endsWith('}')) {
+                            try { updateUI(JSON.parse(linha)); }
+                            catch (e) { /* linha malformada */ }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Erro na leitura:', error);
+                    break;
+                }
+            }
+            console.log('readSerial terminou');
+        }
+
+        connectBtn.addEventListener('click', async () => {
+            if (!('serial' in navigator)) {
+                alert('Seu navegador não suporta Web Serial. Use Chrome ou Edge em localhost.');
+                return;
+            }
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+
+                statusSpan.textContent = 'Conectado';
+                statusSpan.classList.add('connected');
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                bufferParcial = '';
+
+                reader = port.readable.getReader();
+                readSerial();
+            } catch (error) {
+                console.error('Erro ao conectar:', error);
+                alert('Falha ao conectar. Verifique se a porta não está em uso pelo Monitor Serial da IDE.');
+                port = null;
+            }
+        });
+
+        async function disconnectArduino() {
+            if (!port) return;
+            try {
+                if (reader) { await reader.cancel(); reader.releaseLock(); reader = null; }
+                await port.close();
+                port = null;
+
+                statusSpan.textContent = 'Desconectado';
+                statusSpan.classList.remove('connected');
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+
+                document.querySelectorAll('.card-value').forEach(el => el.textContent = '--');
+            } catch (error) {
+                console.error('Erro ao desconectar:', error);
+                reader = null; port = null;
+                statusSpan.textContent = 'Desconectado';
+                statusSpan.classList.remove('connected');
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        disconnectBtn.addEventListener('click', disconnectArduino);
+
+        window.addEventListener('beforeunload', () => {
+            if (reader) reader.cancel().catch(() => {});
+            if (port)   port.close().catch(() => {});
+        });
+    </script>
+</body>
+</html>
